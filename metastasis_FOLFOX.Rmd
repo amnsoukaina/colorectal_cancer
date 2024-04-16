@@ -1,0 +1,536 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+#data - continuous
+library(GEOquery)
+Sys.setenv("VROOM_CONNECTION_SIZE" ="5000000")
+
+GSE72970_data<- getGEO("GSE72970", GSEMatrix =TRUE, AnnotGPL=TRUE)
+if (length(GSE72970_data) > 1) idx <- grep("GPL570", attr(GSE72970_data, "names")) else idx <- 1
+GSE72970_data <-GSE72970_data[[idx]]
+GSE72970_data_pdata <- pData(GSE72970_data)
+
+GSE28702_data<- getGEO("GSE28702", GSEMatrix =TRUE, AnnotGPL=TRUE)
+if (length(GSE28702_data) > 1) idx <- grep("GPL570", attr(GSE28702_data, "names")) else idx <- 1
+GSE28702_data <-GSE28702_data[[idx]]
+GSE28702_data_pdata <- pData(GSE28702_data)
+
+GSE19860_data<- getGEO("GSE19860", GSEMatrix =TRUE, AnnotGPL=TRUE)
+if (length(GSE19860_data) > 1) idx <- grep("GPL570", attr(GSE19860_data, "names")) else idx <- 1
+GSE19860_data <-GSE19860_data[[idx]]
+GSE19860_data_pdata <- pData(GSE19860_data)
+
+```
+
+```{r}
+data_FOLFOX_metastasis <- read.csv(file = 'Metastasis_data.csv', row.names=1)
+clinical_FOLFOX_metastasis <- read.csv(file = 'Metastasis_CLASS.csv')
+library(limma)
+FOLFOX_data_norm <- normalizeBetweenArrays(data_FOLFOX_metastasis)
+#norm.quantiles.ex_metastasis <- normalizeQuantiles(data_FOLFOX_metastasis, ties=TRUE)
+
+par(mar=c(7,5,1,1))
+boxplot(norm.quantiles.ex_metastasis,las =2, colors ="red", outline=FALSE)
+write.csv(norm.quantiles.ex_metastasis,"norm.quantiles.ex_metastasis.csv")
+```
+
+```{r}
+library(limma)
+design_FOLFOX_metastasis<- model.matrix(~0+clinical_FOLFOX_metastasis$CLASS)
+design_FOLFOX_metastasis
+
+## the column names are a bit ugly, so we will rename
+colnames(design_FOLFOX_metastasis) <- c("responder","nonresponder")
+fit_FOLFOX_metastasis <- lmFit(norm.quantiles.ex_metastasis, design_FOLFOX_metastasis)
+head(fit_FOLFOX_metastasis$coefficients)
+
+contrasts <- makeContrasts(responder - nonresponder, levels=design_FOLFOX_metastasis)
+fit2_FOLFOX_metstasis<- contrasts.fit(fit_FOLFOX_metastasis, contrasts)
+fit2_FOLFOX_metstasis <- eBayes(fit2_FOLFOX_metstasis)
+Toptable <- topTable(fit2_FOLFOX_metstasis, coef=1, adjust.method = "fdr")
+```
+
+```{r}
+GSE72970_data_fdata <- fData(GSE72970_data)
+GSE28702_data_fdata <- fData(GSE28702_data)
+GSE19860_data_fdata <- fData(GSE19860_data)
+
+FOLFOX_fdata <- cbind(GSE72970_data_fdata,GSE28702_data_fdata,GSE19860_data_fdata)
+anno_FOLFOX_metastasis <- FOLFOX_fdata
+
+library(stringr)
+library(dplyr)
+
+anno_FOLFOX_metastasis <- select(anno_FOLFOX_metastasis, "Gene symbol","Gene ID", "GO:Function", "GO:Process", "GO:Component")
+fit2_FOLFOX_metstasis$genes <- anno_FOLFOX_metastasis
+topTable(fit2_FOLFOX_metstasis,coef=1, adjust.method = "fdr")
+
+full_results_FOLFOX_metastasis <- topTable(fit2_FOLFOX_metstasis, number=Inf,adjust.method = "fdr")
+#full_results_FOLFOX_metastasis<- tibble::rownames_to_column(full_results_FOLFOX,"ID")
+
+write.csv(full_results_FOLFOX_metastasis, "Toptable_quantile_metastasis.csv")
+
+library(readr)
+full_output_FOLFOX_metastasis <- cbind(full_results_FOLFOX_metastasis,norm.quantiles.ex_metastasis)
+write_csv(full_output_FOLFOX_metastasis, path="full_output_FOLFOX_metastasis.csv")
+```
+```{r}
+#TRAINING SET
+FOLFOX_metastasis_data <- read.csv(file = 'FOLFOX_metastasis_data.unscaled_weka.csv', row.names = 1)
+FOLFOX_metastasis_datat <- t(FOLFOX_metastasis_data)
+FOLFOX_metastasis_datat <- as.data.frame(FOLFOX_metastasis_datat)
+clinical_FOLFOX_metastasis <- read.csv(file = 'metastasis_CLASS_weka.csv')
+```
+
+```{r}
+#SCALE_TRAINING_SET
+
+FOLFOX_metastasis_data.scale <- scale(FOLFOX_metastasis_datat)
+FOLFOX_metastasis_data.scale <- data.frame(FOLFOX_metastasis_data.scale)
+CLASS <- clinical_FOLFOX_metastasis$CLASS
+FOLFOX_metastasis_data.scale.transpose <- t(FOLFOX_metastasis_data.scale)
+FOLFOX_metastasis_data.scale.transpose <- data.frame(FOLFOX_metastasis_data.scale.transpose)
+FOLFOX_metastasis_data.scaled <- cbind(FOLFOX_metastasis_data.scale.transpose,CLASS)
+FOLFOX_metastasis_data.scaled$CLASS <- as.factor(FOLFOX_metastasis_data.scaled$CLASS)
+write.csv(FOLFOX_metastasis_data.scaled, "FOLFOX_metastasis_data.scaled.csv")
+```
+
+
+```{r}
+#Loading caret library
+library(caret)
+#Creating folds
+fold_metastasis <- createFolds(FOLFOX_metastasis_data.scaled$CLASS, k=10)
+#Display folds
+View(fold)
+```
+
+```{r}
+#Training data
+train_data_metastasis <- FOLFOX_metastasis_data.scaled[-fold_metastasis$Fold01, ]
+dim(train_data_metastasis)
+head(train_data_metastasis)
+
+write.csv(t(train_data_metastasis), "train_data_FOLD01.csv")
+
+```
+
+```{r}
+FOLFOX_metastasis_train <- read.csv(file = 'train_data_FOLD01.csv', row.names = 1)
+FOLFOX_metastasis_test <- read.csv(file = 'test_data_FOLD01.csv', row.names = 1)
+```
+
+
+```{r}
+#PCA_TRAINING_SET_BEFORE_FEATURE_SELECTION
+num_pca_train_b_fS_metastasis = subset(FOLFOX_metastasis_train, select = -c(CLASS) )
+
+library(factoextra)
+pc_pvalues_Train_b_fs_metastasis <- prcomp(num_pca_train_b_fS_metastasis,scale = FALSE)#%>% fviz_eig()
+pc_pvalues_Train_b_fs_metastasis
+summary(pc_pvalues_Train_b_fs_metastasis)
+
+library(ggbiplot)
+biplot1=ggbiplot(pc_pvalues_Train_b_fs_metastasis, choices = c(1,2), obs.scale = 1,var.scale = 1,
+  groups = FOLFOX_metastasis_train$CLASS, var.axes = FALSE, ellipse = FALSE) + scale_color_discrete(name = '') +
+  theme(legend.direction = 'horizontal', legend.position = 'top')
+biplot1 + theme_classic()
+
+```
+
+```{r}
+#Creating test data 
+test_data_metastasis <- FOLFOX_metastasis_data.scaled[fold_metastasis$Fold01, ]
+head(test_data_metastasis)
+write.csv(t(test_data_metastasis), "test_data_FOLD01.csv")
+```
+
+```{r}
+#PCA_TEST_SET_BEFORE_FEATURE_SELECTION
+num_pca_test_b_fS_metastasis = subset(FOLFOX_metastasis_test, select = -c(CLASS) )
+
+library(factoextra)
+pc_pvalues_Test_b_fs_metastasis <- prcomp(num_pca_test_b_fS_metastasis,scale = FALSE)#%>% fviz_eig()
+pc_pvalues_Test_b_fs_metastasis
+summary(pc_pvalues_Test_b_fs_metastasis)
+
+library(ggbiplot)
+biplot2=ggbiplot(pc_pvalues_Test_b_fs_metastasis, choices = c(1,2), obs.scale = 1,var.scale = 1,
+  groups = FOLFOX_metastasis_test$CLASS, var.axes = FALSE, ellipse = FALSE) + scale_color_discrete(name = '') +
+  theme(legend.direction = 'horizontal', legend.position = 'top')
+biplot2 + theme_classic()
+
+#obs.scale = 1
+#var.scale = 1,
+```
+```{r}
+
+#FEATURE SELECTION TRAINING SET
+
+library(glmnet)
+library(dplyr)
+library(caret)
+library(pls)
+
+#PCA plot before feature selection performance
+library(ggrepel)
+library(dplyr)
+
+# Loading the library
+train_data_metastasis$CLASS <- as.factor(train_data_metastasis$CLASS)
+nfolds = 5 # number of folds
+
+x_metastasis = model.matrix(CLASS~., train_data_metastasis) # trim off the first column
+                                         # leaving only the predictors
+y_metastasis = train_data_metastasis %>%
+  select(CLASS) %>%
+  unlist() %>%
+  as.numeric()
+
+library(ncvreg)
+#svg("lasso.coef_new.svg",width=10, height=10, pointsize=10)
+lasso_mod = glmnet(x_metastasis, 
+                   y_metastasis, 
+                   alpha = 1)
+# Fit lasso model on training data
+bestlam = lasso_mod$lambda.min  # Select lamda that minimizes training MSE
+bestlam
+plot(lasso_mod)    # Draw plot of coefficients
+set.seed(0)
+cv.fit1 <- cv.ncvreg(
+  X = x_metastasis, y = y_metastasis, penalty = "lasso")
+summary(cv.fit1)
+plot(cv.fit1)
+
+## Within cv.fit is the fitted lasso model (fit)
+## Within the fitted model is beta, a matrix of regression coefficients for each lambda
+## We want only the column of beta corresponding to the lambda that minimizes CV RSME
+all_coefs1 <- cv.fit1$fit$beta[,cv.fit1$fit$lambda == cv.fit1$lambda.min]
+all_coefs1[all_coefs1 != 0]
+#cv.fit$fit$lambda == cv.fit$lambda.min
+write.csv(all_coefs1[all_coefs1 != 0], "lasso.coef.metastasis.train.csv")
+```
+
+```{r}
+
+cv.lambda.lasso <- cv.glmnet(x=x_metastasis, y=y_metastasis, alpha = 1) 
+plot(cv.lambda.lasso)                        #MSE for several lambdas
+cv.lambda.lasso  
+plot(cv.lambda.lasso$glmnet.fit, "lambda", label=FALSE)
+
+l.lasso.min <- cv.lambda.lasso$lambda.min
+lasso.model <- glmnet(x=x_metastasis, y=y_metastasis,alpha  = 1, lambda = l.lasso.min)
+
+## Within cv.fit is the fitted lasso model (fit)
+## Within the fitted model is beta, a matrix of regression coefficients for each lambda
+## We want only the column of beta corresponding to the lambda that minimizes CV RSME
+all_coef <- cv.lambda.lasso$glmnet.fit$beta[,cv.lambda.lasso$glmnet.fit$lambda== cv.lambda.lasso$lambda.min]
+all_coef[all_coef != 0]
+#cv.fit$fit$lambda == cv.fit$lambda.min
+write.csv(all_coef[all_coef != 0], "lasso.coef.metastasis_2nd_option.csv")
+```
+
+```{r}
+# Run algorithms using 10-fold cross validation
+FOLFOX_LASSO_FOLD01_data <- read.csv(file = 'train_data_FOLD01 - lasso.csv', row.names = 1)
+FOLFOX_LASSO_FOLD01_data$CLASS <-as.factor(FOLFOX_LASSO_FOLD01_data$CLASS)
+FOLFOX_metastasis_test$CLASS <-as.factor(FOLFOX_metastasis_test$CLASS)
+
+
+library(randomForest)
+library(randomForest)
+library(prediction)
+library(ROCR)
+library(pROC)
+require(party)
+library(dplyr)
+library(ggplot2)
+library(caret)
+library(varImp)
+#rf-other method
+x.rf.imp.weka <- randomForest(CLASS~ ., data= FOLFOX_LASSO_FOLD01_data)
+p1.x.cf1_imp.weka<- predict(x.rf.imp.weka, FOLFOX_LASSO_FOLD01_data)
+confusionMatrix(p1.x.cf1_imp.weka, FOLFOX_LASSO_FOLD01_data$CLASS)
+pred.x.cf1_imp.weka <- predict(x.rf.imp.weka, FOLFOX_metastasis_test, type = "response")
+confusionMatrix(pred.x.cf1_imp.weka, FOLFOX_metastasis_test$CLASS)
+preds.x.cf1_imp.weka <- prediction(as.numeric(pred.x.cf1_imp.weka), na.omit(FOLFOX_metastasis_test$CLASS))
+perf.x.cf1_imp.weka <- performance(preds.x.cf1_imp.weka,"tpr","fpr")
+performance(preds.x.cf1_imp.weka,"auc")@y.values
+
+#SVM
+library(caret)
+require(e1071)
+x.svm.imp.weka <- svm(CLASS~., data= FOLFOX_LASSO_FOLD01_data,type="C-classification",kernel="radial")
+p1.x.svm.cf1_imp.weka <- predict(x.svm.imp.weka, na.omit(FOLFOX_LASSO_FOLD01_data), type="prob")
+confusionMatrix(p1.x.svm.cf1_imp.weka, na.omit(FOLFOX_LASSO_FOLD01_data$CLASS))
+pred.svm.cf1_imp.weka <- predict(x.svm.imp.weka,  na.omit(FOLFOX_metastasis_test), type="prob")
+confusionMatrix(pred.svm.cf1_imp.weka, na.omit(FOLFOX_metastasis_test$CLASS))
+preds.svm.cf1_imp.weka <- prediction(as.numeric(pred.svm.cf1_imp.weka), na.omit(FOLFOX_metastasis_test$CLASS))
+perf.svm.cf1_imp.weka <- performance(preds.svm.cf1_imp.weka,"tpr","fpr")
+performance(preds.svm.cf1_imp.weka,"auc")@y.values
+
+
+#KNN
+trControl2 <- trainControl(method = "repeatedcv",
+                          number = 10,
+                          repeats = 3)
+x.knn.imp.weka <- train(CLASS~., data=na.omit(FOLFOX_LASSO_FOLD01_data), method="knn")
+p1.x.knn.cf1_imp.weka <- predict(x.knn.imp.weka, na.omit(FOLFOX_LASSO_FOLD01_data), type="raw")
+confusionMatrix(p1.x.knn.cf1_imp.weka, FOLFOX_LASSO_FOLD01_data$CLASS)
+pred.knn.cf1.imp.weka <- predict(x.knn.imp.weka,  na.omit(FOLFOX_metastasis_test), type="raw")
+confusionMatrix(pred.knn.cf1.imp.weka, na.omit(FOLFOX_metastasis_test$CLASS))
+preds.knn.cf1_imp.weka <- prediction(as.numeric(pred.knn.cf1.imp.weka), na.omit(FOLFOX_metastasis_test$CLASS))
+perf.knn.cf1_imp.weka <- performance(preds.knn.cf1_imp.weka,"tpr","fpr")
+performance(preds.knn.cf1_imp.weka,"auc")@y.values
+```
+```{r}
+#TRAIN_ LASSO
+library(pROC)
+#rf_train
+pred_rf_varselrf_lasso <- predict(x.rf.imp.weka, FOLFOX_LASSO_FOLD01_data, index=2, type="prob", norm.votes=TRUE, predict.all=FALSE, proximity=FALSE, nodes=FALSE)
+head(pred_rf_varselrf_lasso)
+pred_rf_varselrf_lasso <- data.frame(pred_rf_varselrf_lasso)
+
+rf_train_lasso_varselrf <- roc(FOLFOX_LASSO_FOLD01_data$CLASS, pred_rf_varselrf_lasso$responder, percent=F,   boot.n=1000, ci.alpha=0.95, stratified=FALSE, plot=TRUE, grid=TRUE, show.thres=TRUE, legacy.axes = TRUE, reuse.auc = TRUE,print.auc = TRUE, print.thres.col = "blue", ci=TRUE, ci.type="bars", print.thres.cex = 0.3, main = paste("ROC curve of SVM using ","(N = ",nrow(FOLFOX_LASSO_FOLD01_data),")") )
+rf_train_lasso_varselrf
+
+#svm_train
+
+pred_svm_lasso_varselrf <- predict(x.svm.imp.weka, FOLFOX_LASSO_FOLD01_data, index=2, type="prob", norm.votes=TRUE, predict.all=FALSE, proximity=FALSE, nodes=FALSE)
+head(pred_svm_lasso_varselrf)
+pred_svm_lasso_varselrf <- data.frame(pred_svm_lasso_varselrf)
+
+svm_train_varselrf_lasso <- roc(FOLFOX_LASSO_FOLD01_data$CLASS, pred_svm_lasso_varselrf$responder, percent=F,   boot.n=1000, ci.alpha=0.95, stratified=FALSE, plot=TRUE, grid=TRUE, show.thres=TRUE, legacy.axes = TRUE, reuse.auc = TRUE,print.auc = TRUE, print.thres.col = "blue", ci=TRUE, ci.type="bars", print.thres.cex = 0.3, main = paste("ROC curve of SVM using","(N = ",nrow(FOLFOX_LASSO_FOLD01_data),")") )
+svm_train_varselrf_lasso
+
+#KNN
+
+pred_knn_varselrf <- predict(x.knn.imp.weka, FOLFOX_LASSO_FOLD01_data, index=2, type="prob", norm.votes=TRUE, predict.all=FALSE, proximity=FALSE, nodes=FALSE)
+head(pred_knn_varselrf)
+pred_knn_varselrf <- data.frame(pred_knn_varselrf)
+knn_train_varselrf_lasso <- roc(FOLFOX_LASSO_FOLD01_data$CLASS, pred_knn_varselrf$responder, percent=F,   boot.n=1000, ci.alpha=0.95, stratified=FALSE, plot=TRUE, grid=TRUE, show.thres=TRUE, legacy.axes = TRUE, reuse.auc = TRUE,print.auc = TRUE, print.thres.col = "blue", ci=TRUE, ci.type="bars", print.thres.cex = 0.3, main = paste("ROC curve of KNN using","(N = ",nrow(FOLFOX_LASSO_FOLD01_data),")") )
+knn_train_varselrf_lasso
+
+
+
+#TEST_ LASSO
+library(pROC)
+#rf_train
+pred_rf_lasso_varselrf_test <- predict(x.rf.imp.weka, FOLFOX_metastasis_test, index=2, type="prob", norm.votes=TRUE, predict.all=FALSE, proximity=FALSE, nodes=FALSE)
+head(pred_rf_lasso_varselrf_test)
+pred_rf_lasso_varselrf_test <- data.frame(pred_rf_lasso_varselrf_test)
+
+rf_test_varselrf_lasso <- roc(FOLFOX_metastasis_test$CLASS, pred_rf_lasso_varselrf_test$responder, percent=F,   boot.n=1000, ci.alpha=0.95, stratified=FALSE, plot=TRUE, grid=TRUE, show.thres=TRUE, legacy.axes = TRUE, reuse.auc = TRUE,print.auc = TRUE, print.thres.col = "blue", ci=TRUE, ci.type="bars", print.thres.cex = 0.3, main = paste("ROC curve of RF using","(N = ",nrow(test_data),")") )
+rf_test_varselrf_lasso
+
+#svm_train
+
+pred_svm_varselrf_lasso_test <- predict(x.svm.imp.weka, FOLFOX_metastasis_test, index=2, type="class", norm.votes=TRUE, predict.all=FALSE, proximity=FALSE, nodes=FALSE)
+head(pred_svm_varselrf_lasso_test)
+pred_svm_varselrf_lasso_test <- data.frame(pred_svm_varselrf_lasso_test)
+
+svm_test_varselrf_lasso <- roc(FOLFOX_metastasis_test$CLASS, pred_rf_lasso_varselrf_test$responder, percent=F,   boot.n=1000, ci.alpha=0.95, stratified=FALSE, plot=TRUE, grid=TRUE, show.thres=TRUE, legacy.axes = TRUE, reuse.auc = TRUE,print.auc = TRUE, print.thres.col = "blue", ci=TRUE, ci.type="bars", print.thres.cex = 0.3, main = paste("ROC curve of SVM using","(N = ",nrow(test_data),")") )
+svm_test_varselrf_lasso
+
+#KNN
+
+pred_knn_varselrf_lasso_test <- predict(x.knn.imp.weka, FOLFOX_metastasis_test, index=2, type="prob", norm.votes=TRUE, predict.all=FALSE, proximity=FALSE, nodes=FALSE)
+head(pred_knn_varselrf_lasso_test)
+pred_knn_varselrf_lasso_test <- data.frame(pred_knn_varselrf_lasso_test)
+knn_test_varselrf_lasso <- roc(FOLFOX_metastasis_test$CLASS, pred_knn_varselrf_test$responder, percent=F,   boot.n=1000, ci.alpha=0.95, stratified=FALSE, plot=TRUE, grid=TRUE, show.thres=TRUE, legacy.axes = TRUE, reuse.auc = TRUE,print.auc = TRUE, print.thres.col = "blue", ci=TRUE, ci.type="bars", print.thres.cex = 0.3, main = paste("ROC curve of KNN using","(N = ",nrow(test_data),")") )
+knn_test_varselrf_lasso
+
+ggroc(list(RF=rf_train_lasso_varselrf, SVM =svm_train_varselrf_lasso, KNN=knn_train_varselrf_lasso), lwd=1.0)+
+geom_abline(intercept = 1, slope = 1, color = "red", linetype = "dashed", lwd=1.2)+
+scale_color_manual(labels = c("RandomForest", "SVM", "KNN"), values= c("#88D04B", "#D65076", "#EFC050"))+
+ggtitle("ROC COMPARISON")+
+labs(x="Specificity", y="Sensitivity")+
+theme(axis.text.y = element_text(size=12))+
+theme(axis.text.x = element_text(size=12))+
+theme(plot.title = element_text(face="bold", size=18))+
+theme(axis.title = element_text(size=14))+
+theme(strip.text = element_text(size = 14))+
+theme(legend.title=element_blank())
+
+
+ggroc(list(RF=rf_test_varselrf_lasso, SVM =svm_test_varselrf_lasso, KNN=knn_test_varselrf_lasso), lwd=1.0)+
+geom_abline(intercept = 1, slope = 1, color = "red", linetype = "dashed", lwd=1.2)+
+scale_color_manual(labels = c("RandomForest", "SVM", "KNN"), values= c("#88D04B", "#D65076", "#EFC050"))+
+ggtitle("ROC COMPARISON")+
+labs(x="Specificity", y="Sensitivity")+
+theme(axis.text.y = element_text(size=12))+
+theme(axis.text.x = element_text(size=12))+
+theme(plot.title = element_text(face="bold", size=18))+
+theme(axis.title = element_text(size=14))+
+theme(strip.text = element_text(size = 14))+
+theme(legend.title=element_blank())
+
+```
+
+
+
+
+```{r}
+#VARSELRF
+
+x_varselrf <- dplyr::select(train_data_metastasis, -CLASS)
+y_varselrf <- train_data_metastasis$CLASS
+
+library(varSelRF)
+rf.vs1<- varSelRF(x_varselrf, y_varselrf,c.sd=1, mtryFactor=1, ntree = 5000, ntreeIterat = 2000,vars.drop.frac = 0.2)
+VARS <-rf.vs1$selected.vars
+write.csv(VARS, "VARS_metastasis_FOLD01.csv")
+```
+
+```{r}
+# Run algorithms using 10-fold cross validation
+varselrf_train.weka <- read.csv(file = 'train_data_FOLD01 - varselrf.csv', row.names = 1)
+varselrf_train.weka$CLASS <-as.factor(varselrf_train.weka$CLASS)
+
+
+# Run algorithms using 10-fold cross validation
+
+library(randomForest)
+library(randomForest)
+library(prediction)
+library(ROCR)
+library(pROC)
+require(party)
+library(dplyr)
+library(ggplot2)
+library(caret)
+library(varImp)
+#rf-other method
+x.rf.varselrf.weka <- randomForest(CLASS~ ., data=varselrf_train.weka)
+p1.x.cf1_varselrf.weka<- predict(x.rf.varselrf.weka, varselrf_train.weka)
+confusionMatrix(p1.x.cf1_varselrf.weka, varselrf_train.weka$CLASS)
+pred.x.cf1_varselrf.weka <- predict(x.rf.varselrf.weka, FOLFOX_metastasis_test, type = "response")
+confusionMatrix(pred.x.cf1_varselrf.weka, FOLFOX_metastasis_test$CLASS)
+preds.x.cf1_varselrf.weka <- prediction(as.numeric(pred.x.cf1_varselrf.weka), na.omit(FOLFOX_metastasis_test$CLASS))
+perf.x.cf1_varselrf.weka <- performance(preds.x.cf1_varselrf.weka,"tpr","fpr")
+performance(preds.x.cf1_varselrf.weka,"auc")@y.values
+
+#SVM
+library(caret)
+require(e1071)
+x.svm.varselrf.weka <- svm(CLASS~., data = na.omit(varselrf_train.weka),type="C-classification",kernel="radial")
+p1.x.svm.cf1_varselrf.weka <- predict(x.svm.varselrf.weka, na.omit(varselrf_train.weka), type="prob")
+confusionMatrix(p1.x.svm.cf1_varselrf.weka, na.omit(varselrf_train.weka$CLASS))
+pred.svm.cf1_varselrf.weka <- predict(x.svm.varselrf.weka,  na.omit(FOLFOX_metastasis_test), type="prob")
+confusionMatrix(pred.svm.cf1_varselrf.weka, na.omit(FOLFOX_metastasis_test$CLASS))
+preds.svm.cf1_varselrf.weka <- prediction(as.numeric(pred.svm.cf1_varselrf.weka), na.omit(FOLFOX_metastasis_test$CLASS))
+perf.svm.cf1_varselrf.weka <- performance(preds.svm.cf1_varselrf.weka,"tpr","fpr")
+performance(preds.svm.cf1_varselrf.weka,"auc")@y.values
+
+
+#KNN
+trControl2 <- trainControl(method = "repeatedcv",
+                          number = 10,
+                          repeats = 3)
+x.knn.varselrf.weka <- train(CLASS~., data=na.omit(varselrf_train.weka), method="knn")
+p1.x.knn.cf1_varselrf.weka <- predict(x.knn.varselrf.weka, na.omit(varselrf_train.weka), type="raw")
+confusionMatrix(p1.x.knn.cf1_varselrf.weka, varselrf_train.weka$CLASS)
+pred.knn.cf1_varselrf.weka <- predict(x.knn.varselrf.weka,  na.omit(FOLFOX_metastasis_test), type="raw")
+confusionMatrix(pred.knn.cf1_varselrf.weka, na.omit(FOLFOX_metastasis_test$CLASS))
+preds.knn.cf1_varselrf.weka <- prediction(as.numeric(pred.knn.cf1_varselrf.weka), na.omit(FOLFOX_metastasis_test$CLASS))
+perf.knn.cf1_varselrf.weka <- performance(preds.knn.cf1_varselrf.weka,"tpr","fpr")
+performance(preds.knn.cf1_varselrf.weka,"auc")@y.values
+```
+
+```{r}
+# Run algorithms using 10-fold cross validation
+varselrf_train.weka <- read.csv(file = 'train_data_FOLD01 - lasso - varselrf.csv', row.names = 1)
+varselrf_train.weka$CLASS <-as.factor(varselrf_train.weka$CLASS)
+
+
+# Run algorithms using 10-fold cross validation
+
+library(randomForest)
+library(randomForest)
+library(prediction)
+library(ROCR)
+library(pROC)
+require(party)
+library(dplyr)
+library(ggplot2)
+library(caret)
+library(varImp)
+#rf-other method
+x.rf.varselrf.weka <- randomForest(CLASS~ ., data=varselrf_train.weka)
+p1.x.cf1_varselrf.weka<- predict(x.rf.varselrf.weka, varselrf_train.weka)
+confusionMatrix(p1.x.cf1_varselrf.weka, varselrf_train.weka$CLASS)
+pred.x.cf1_varselrf.weka <- predict(x.rf.varselrf.weka, FOLFOX_metastasis_test, type = "response")
+confusionMatrix(pred.x.cf1_varselrf.weka, FOLFOX_metastasis_test$CLASS)
+preds.x.cf1_varselrf.weka <- prediction(as.numeric(pred.x.cf1_varselrf.weka), na.omit(FOLFOX_metastasis_test$CLASS))
+perf.x.cf1_varselrf.weka <- performance(preds.x.cf1_varselrf.weka,"tpr","fpr")
+performance(preds.x.cf1_varselrf.weka,"auc")@y.values
+
+#SVM
+library(caret)
+require(e1071)
+x.svm.varselrf.weka <- svm(CLASS~., data = na.omit(varselrf_train.weka),type="C-classification",kernel="radial")
+p1.x.svm.cf1_varselrf.weka <- predict(x.svm.varselrf.weka, na.omit(varselrf_train.weka), type="prob")
+confusionMatrix(p1.x.svm.cf1_varselrf.weka, na.omit(varselrf_train.weka$CLASS))
+pred.svm.cf1_varselrf.weka <- predict(x.svm.varselrf.weka,  na.omit(FOLFOX_metastasis_test), type="prob")
+confusionMatrix(pred.svm.cf1_varselrf.weka, na.omit(FOLFOX_metastasis_test$CLASS))
+preds.svm.cf1_varselrf.weka <- prediction(as.numeric(pred.svm.cf1_varselrf.weka), na.omit(FOLFOX_metastasis_test$CLASS))
+perf.svm.cf1_varselrf.weka <- performance(preds.svm.cf1_varselrf.weka,"tpr","fpr")
+performance(preds.svm.cf1_varselrf.weka,"auc")@y.values
+
+
+#KNN
+trControl2 <- trainControl(method = "repeatedcv",
+                          number = 10,
+                          repeats = 3)
+x.knn.varselrf.weka <- train(CLASS~., data=na.omit(varselrf_train.weka), method="knn")
+p1.x.knn.cf1_varselrf.weka <- predict(x.knn.varselrf.weka, na.omit(varselrf_train.weka), type="raw")
+confusionMatrix(p1.x.knn.cf1_varselrf.weka, varselrf_train.weka$CLASS)
+pred.knn.cf1_varselrf.weka <- predict(x.knn.varselrf.weka,  na.omit(FOLFOX_metastasis_test), type="raw")
+confusionMatrix(pred.knn.cf1_varselrf.weka, na.omit(FOLFOX_metastasis_test$CLASS))
+preds.knn.cf1_varselrf.weka <- prediction(as.numeric(pred.knn.cf1_varselrf.weka), na.omit(FOLFOX_metastasis_test$CLASS))
+perf.knn.cf1_varselrf.weka <- performance(preds.knn.cf1_varselrf.weka,"tpr","fpr")
+performance(preds.knn.cf1_varselrf.weka,"auc")@y.values
+```
+
+```{r}
+#PCA_TRAIN_SET_AFTER_FEATURE_SELECTION
+num_pca_test_b_fS = subset(varselrf_train.weka, select = -c(CLASS) )
+
+library(factoextra)
+pc_pvalues_Train_af_fs <- prcomp(num_pca_test_b_fS,scale = FALSE)#%>% fviz_eig()
+pc_pvalues_Train_af_fs
+summary(pc_pvalues_Train_af_fs)
+
+library(ggbiplot)
+biplot3=ggbiplot(pc_pvalues_Train_af_fs, choices = c(1,2), obs.scale = 1,var.scale = 1,
+  groups = varselrf_train.weka$CLASS, var.axes = FALSE, ellipse = FALSE) + scale_color_discrete(name = '') +
+  theme(legend.direction = 'horizontal', legend.position = 'top')
+biplot3 + theme_classic()
+
+#obs.scale = 1
+#var.scale = 1,
+```
+```{r}
+#PCA_TEST_SET_AFTER_FEATURE_SELECTION
+
+vsurf.lasso.metastasis.TEST.data <- read.csv(file = 'test_set_varselrf_lasso.csv', row.names = 1)
+num_pca_test_b_fS = subset(vsurf.lasso.metastasis.TEST.data, select = -c(CLASS) )
+
+library(factoextra)
+pc_pvalues_TEST_af_fs <- prcomp(num_pca_test_b_fS,scale = FALSE)#%>% fviz_eig()
+pc_pvalues_TEST_af_fs
+summary(pc_pvalues_TEST_af_fs)
+
+library(ggbiplot)
+biplot4=ggbiplot(pc_pvalues_TEST_af_fs, choices = c(1,2), obs.scale = 1,var.scale = 1,
+  groups = vsurf.lasso.metastasis.TEST.data$CLASS, var.axes = FALSE, ellipse = FALSE) + scale_color_discrete(name = '') +
+  theme(legend.direction = 'horizontal', legend.position = 'top')
+biplot4 + theme_classic()
+
+#obs.scale = 1
+#var.scale = 1,
+```
+
