@@ -1,0 +1,21 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r}
+#remove.packages("cli")
+#install.packages("cli")
+
+library(oligo)
+library(affycoretools)
+library(affy)
+
+files_mix_FOLFOX_GSE72970_metastasis <- list.files(pattern = "CEL.gz")
+celfiles_mix_FOLFOX_GSE72970_metastasis  <- lapply(files_mix_FOLFOX_GSE72970_metastasis , function(x) ReadAffy(filenames = x))
+table(sapply(celfiles_mix_FOLFOX_GSE72970_metastasis , annotation))
+hgu133plus2_FOLFOX_GSE72970_metastasis  <- ReadAffy(filenames = celfiles_mix_FOLFOX_GSE72970_metastasis$hgu133plus2)
+```
+
+
