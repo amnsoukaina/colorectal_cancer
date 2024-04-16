@@ -1,0 +1,76 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+data_GSE72970_GSE62080_AllStages <- read.csv(file = 'data_GSE72970_GSE62080_AllStages.csv', row.names = 1)
+data_GSE72970_GSE62080_AllStages.normalize = normalizeBetweenArrays(data_GSE72970_GSE62080_AllStages)
+
+```
+
+```{r}
+clinical_data_GSE62080_GSE72970_AllStages <- read.csv(file = 'clinical_data_GSE62080_GSE72970_AllStages.csv')
+```
+
+
+```{r}
+#Is the data normalized?
+par(mar=c(7,5,1,1))
+boxplot(data_GSE72970_GSE62080_AllStages.normalize,las =2, outline=FALSE)
+```
+
+```{r}
+scale.data_GSE72970_GSE62080_AllStages.normalize <- scale(data_GSE72970_GSE62080_AllStages.normalize)
+scale.data_GSE72970_GSE62080_AllStages_transform <- t(scale.data_GSE72970_GSE62080_AllStages.normalize)
+scale.data_GSE72970_GSE62080_AllStages_transform <- as.data.frame(scale.data_GSE72970_GSE62080_AllStages_transform)
+response <- clinical_data_GSE62080_GSE72970_AllStages$response
+scale.data_GSE72970_GSE62080_AllStages_transform <- cbind(scale.data_GSE72970_GSE62080_AllStages_transform, response)
+scale_data_complete <- scale.data_GSE72970_GSE62080_AllStages_transform
+scale_data_complete$response <- as.factor(scale_data_complete$response)
+scale_data_complete
+write.csv(scale_data_complete, "scale_data_complete.csv")
+```
+
+
+```{r}
+#Is the data normalized?
+par(mar=c(7,5,1,1))
+boxplot(scale.data_GSE72970_GSE62080_AllStages.normalize,las =2, outline=FALSE)
+```
+```{r}
+library(ggrepel)
+library(dplyr)
+library(stats)
+
+#Differential Expression
+
+
+library(limma)
+design_FOLFIRI_GSE62080_GSE72970_AllStages <- model.matrix(~0+factor(clinical_data_GSE62080_GSE72970_AllStages$response))
+design_FOLFIRI_GSE62080_GSE72970_AllStages
+
+## the column names are a bit ugly, so we will rename
+colnames(design_FOLFIRI_GSE62080_GSE72970_AllStages) <- c("responder","nonresponder")
+fit_FOLFIRI_GSE62080_GSE72970_AllStages <- lmFit(data_GSE72970_GSE62080_AllStages, design_FOLFIRI_GSE62080_GSE72970_AllStages)
+head(fit_FOLFIRI_GSE62080_GSE72970_AllStages$coefficients)
+
+contrasts <- makeContrasts(responder - nonresponder, levels=design_FOLFIRI_GSE62080_GSE72970_AllStages)
+fit2_FOLFIRI_GSE62080_GSE72970_AllStages<- contrasts.fit(fit_FOLFIRI_GSE62080_GSE72970_AllStages, contrasts)
+fit2_FOLFIRI_GSE62080_GSE72970_AllStages <- eBayes(fit2_FOLFIRI_GSE62080_GSE72970_AllStages)
+Toptable_FOLFIRI_GSE62080_GSE72970_AllStages <- topTable(fit2_FOLFIRI_GSE62080_GSE72970_AllStages, coef=1,  n = "inf",  adjust = "BH")
+Toptable_FOLFIRI_GSE62080_GSE72970_AllStages$FC <- logratio2foldchange(Toptable_FOLFIRI_GSE62080_GSE72970_AllStages$logFC, base = 2)
+Toptable_FOLFIRI_GSE62080_GSE72970_AllStages
+
+FDR_FOLFIRI_GSE62080_GSE72970_AllStages <- p.adjust(Toptable_FOLFIRI_GSE62080_GSE72970_AllStages$P.Value, method = "BH", n = length(Toptable_FOLFIRI_GSE62080_GSE72970_AllStages$P.Value))
+FDR_FOLFIRI_GSE62080_GSE72970_AllStages <- as.data.frame(FDR_FOLFIRI_GSE62080_GSE72970_AllStages)
+FDR_FOLFIRI_GSE62080_GSE72970_AllStages
+
+Results.Toptable_FOLFIRI_GSE62080_GSE72970_AllStages<- cbind(Toptable_FOLFIRI_GSE62080_GSE72970_AllStages, FDR_FOLFIRI_GSE62080_GSE72970_AllStages)
+Results.Toptable_FOLFIRI_GSE62080_GSE72970_AllStages
+```
+
+
+
+
+
