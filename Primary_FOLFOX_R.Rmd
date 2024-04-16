@@ -1,0 +1,616 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+#data - continuous
+library(GEOquery)
+Sys.setenv("VROOM_CONNECTION_SIZE" ="5000000")
+
+GSE28702_data<- getGEO("GSE28702", GSEMatrix =TRUE, AnnotGPL=TRUE)
+if (length(GSE28702_data) > 1) idx <- grep("GPL570", attr(GSE28702_data, "names")) else idx <- 1
+GSE28702_data <-GSE28702_data[[idx]]
+GSE28702_data_pdata <- pData(GSE28702_data)
+```
+
+```{r}
+data_FOLFOX_primary <- read.csv(file = '53_Primary_data_weka.csv', row.names=1)
+clinical_FOLFOX_primary <- read.csv(file = '53_clinical.csv')
+
+library(limma)
+#norm.quantiles.ex_metastasis <- normalizeQuantiles(data_FOLFOX_metastasis, ties=TRUE)
+par(mar=c(7,5,1,1))
+boxplot(data_FOLFOX_primary,las =2, colors ="red", outline=FALSE)
+#write.csv(norm.quantiles.ex_metastasis,"norm.quantiles.ex_metastasis.csv")
+```
+
+```{r}
+library(limma)
+design_FOLFOX_primary<- model.matrix(~0+clinical_FOLFOX_primary$CLASS)
+design_FOLFOX_primary
+
+## the column names are a bit ugly, so we will rename
+colnames(design_FOLFOX_primary) <- c("responder","nonresponder")
+fit_FOLFOX_primary <- lmFit(data_FOLFOX_primary, design_FOLFOX_primary)
+head(fit_FOLFOX_primary$coefficients)
+
+contrasts <- makeContrasts(responder - nonresponder, levels=design_FOLFOX_primary)
+fit2_FOLFOX_primary <- contrasts.fit(fit_FOLFOX_primary, contrasts)
+fit2_FOLFOX_primary <- eBayes(fit2_FOLFOX_primary)
+Toptable <- topTable(fit2_FOLFOX_primary, coef=1, adjust.method = "fdr")
+```
+```{r}
+GSE28702_data_fdata <- fData(GSE28702_data)
+
+library(stringr)
+library(dplyr)
+
+GSE28702_data_fdata <- select(GSE28702_data_fdata, "Gene symbol","Gene ID", "GO:Function", "GO:Process", "GO:Component")
+fit2_FOLFOX_primary$genes <- GSE28702_data_fdata
+topTable(fit2_FOLFOX_primary,coef=1, adjust.method = "fdr")
+
+full_results_FOLFOX_primary <- topTable(fit2_FOLFOX_primary, number=Inf,adjust.method = "fdr")
+#full_results_FOLFOX_metastasis<- tibble::rownames_to_column(full_results_FOLFOX,"ID")
+
+write.csv(full_results_FOLFOX_primary, "Toptable_quantile_primary.csv")
+
+library(readr)
+full_output_FOLFOX_primary <- cbind(full_results_FOLFOX_primary,data_FOLFOX_primary)
+write_csv(full_output_FOLFOX_primary, path="full_output_FOLFOX_primary.csv")
+```
+
+```{r}
+#SCALE_TRAINING_SET
+DEGs_Primary_53_data_weka <- read.csv(file = '53_Primary_data_weka.csv', row.names=1)
+clinical_53_FOLFOX_primary <- read.csv(file = '53_clinical.csv')
+
+FOLFOX_primary_data.scale <- scale(DEGs_Primary_53_data_weka)
+FOLFOX_primary_data.scale <- data.frame(FOLFOX_primary_data.scale)
+response <- clinical_53_FOLFOX_primary$response
+FOLFOX_primary_data.scale.transpose <- t(FOLFOX_primary_data.scale)
+FOLFOX_primary_data.scale.transpose <- data.frame(FOLFOX_primary_data.scale.transpose)
+FOLFOX_primary_53_data.scaled <- cbind(FOLFOX_primary_data.scale.transpose,response)
+FOLFOX_primary_53_data.scaled$response <- as.factor(FOLFOX_primary_53_data.scaled$response)
+write.csv(FOLFOX_primary_53_data.scaled, "FOLFOX_primary_53_data.scaled_weka_2.csv")
+```
+
+```{r}
+#SCALE_TESTING_SET
+
+DEGs_Primary__data <- read.csv(file = '84_data_primary.weka.csv', row.names=1)
+clinical_FOLFOX_primary <- read.csv(file = '84_clinical.csv')
+
+FOLFOX_02_data.scale <- scale(DEGs_Primary__data)
+FOLFOX_02_data.scale <- data.frame(FOLFOX_02_data.scale)
+response <- clinical_FOLFOX_primary$response
+FOLFOX_02_data.scale.transpose <- t(FOLFOX_02_data.scale)
+FOLFOX_02_data.scale.transpose <- data.frame(FOLFOX_02_data.scale.transpose)
+FOLFOX_02_data.scaled <- cbind(FOLFOX_02_data.scale.transpose,response)
+FOLFOX_02_data.scaled$response <- as.factor(FOLFOX_02_data.scaled$response)
+write.csv(FOLFOX_02_data.scaled, "FOLFOX_02_data.scaled_2.csv")
+```
+
+```{r}
+#Loading caret library
+library(caret)
+#Creating folds
+fold_1 <- createFolds(FOLFOX_primary_53_data.scaled$response, k=10)
+#Display folds
+View(fold_1)
+dim(FOLFOX_primary_53_data.scaled)
+```
+
+```{r}
+#Training data
+train_data_53 <- FOLFOX_primary_53_data.scaled[-fold_1$Fold02, ]
+dim(train_data_53)
+head(train_data_53)
+write.csv(train_data_53, "train_data_53_FOLD02_2.csv")
+
+```
+
+```{r}
+#PCA_TRAINING_SET_BEFORE_FEATURE_SELECTION
+num_pca_train_b_fS = subset(train_data_53, select = -c(response) )
+
+library(factoextra)
+pc_pvalues_Train_b_fs <- prcomp(num_pca_train_b_fS,scale = FALSE)#%>% fviz_eig()
+pc_pvalues_Train_b_fs
+summary(pc_pvalues_Train_b_fs)
+
+library(ggbiplot)
+biplot1=ggbiplot(pc_pvalues_Train_b_fs, choices = c(1,2), obs.scale = 1,var.scale = 1,
+  groups = train_data_53$response, var.axes = FALSE, ellipse = FALSE) + scale_color_discrete(name = '') +
+  theme(legend.direction = 'horizontal', legend.position = 'top')
+biplot1 + theme_classic()
+
+```
+
+```{r}
+#Creating test data 
+test_data_53 <- FOLFOX_primary_53_data.scaled[fold_1$Fold02, ]
+head(test_data_53)
+write.csv(test_data_53, "test_data_53_FOLD02_2.csv")
+```
+```{r}
+#PCA_TEST_SET_BEFORE_FEATURE_SELECTION
+num_pca_test_b_fS_primary = subset(test_data_53, select = -c(response) )
+
+library(factoextra)
+pc_pvalues_Test_b_fs_primary <- prcomp(num_pca_test_b_fS_primary,scale = FALSE)#%>% fviz_eig()
+pc_pvalues_Test_b_fs_primary
+summary(pc_pvalues_Test_b_fs_primary)
+
+library(ggbiplot)
+biplot2=ggbiplot(pc_pvalues_Test_b_fs_primary, choices = c(1,2), obs.scale = 1,var.scale = 1,
+  groups = test_data_53$response, var.axes = FALSE, ellipse = FALSE) + scale_color_discrete(name = '') +
+  theme(legend.direction = 'horizontal', legend.position = 'top')
+biplot2 + theme_classic()
+
+```
+
+```{r}
+#PCA_TEST_SET_BEFORE_FEATURE_SELECTION
+
+fold_2 <- createFolds(FOLFOX_02_data.scaled$response, k=10)
+#Display folds
+View(fold_2)
+dim(fold_2)
+
+test_data_02 <- FOLFOX_02_data.scaled[-fold_2$Fold08, ]
+head(test_data_02)
+
+num_pca_test_b_fS_primary_02 = subset(test_data_02, select = -c(response) )
+
+library(factoextra)
+pc_pvalues_Test_b_fs_primary_02 <- prcomp(num_pca_test_b_fS_primary_02,scale = FALSE)#%>% fviz_eig()
+pc_pvalues_Test_b_fs_primary_02
+summary(pc_pvalues_Test_b_fs_primary_02)
+
+library(ggbiplot)
+biplot3=ggbiplot(pc_pvalues_Test_b_fs_primary_02, choices = c(1,2), obs.scale = 1,var.scale = 1,
+  groups = test_data_02$response, var.axes = FALSE, ellipse = FALSE) + scale_color_discrete(name = '') +
+  theme(legend.direction = 'horizontal', legend.position = 'top')
+biplot3 + theme_classic()
+```
+```{r}
+#FEATURE SELECTION TRAINING SET
+
+library(glmnet)
+library(dplyr)
+library(caret)
+library(pls)
+
+#PCA plot before feature selection performance
+library(ggrepel)
+library(dplyr)
+
+# Loading the library
+train_data_53$response <- as.factor(train_data_53$response)
+nfolds = 5 # number of folds
+
+x_primary = model.matrix(response~., train_data_53) # trim off the first column
+                                         # leaving only the predictors
+y_primary = train_data_53 %>%
+  select(response) %>%
+  unlist() %>%
+  as.numeric()
+
+library(ncvreg)
+#svg("lasso.coef_new.svg",width=10, height=10, pointsize=10)
+lasso_mod = glmnet(x_primary, 
+                   y_primary, 
+                   alpha = 1)
+# Fit lasso model on training data
+bestlam = lasso_mod$lambda.min  # Select lamda that minimizes training MSE
+bestlam
+plot(lasso_mod)    # Draw plot of coefficients
+set.seed(0)
+cv.fit1 <- cv.ncvreg(
+  X = x_primary, y = y_primary, penalty = "lasso")
+summary(cv.fit1)
+plot(cv.fit1)
+
+## Within cv.fit is the fitted lasso model (fit)
+## Within the fitted model is beta, a matrix of regression coefficients for each lambda
+## We want only the column of beta corresponding to the lambda that minimizes CV RSME
+all_coefs1 <- cv.fit1$fit$beta[,cv.fit1$fit$lambda == cv.fit1$lambda.min]
+all_coefs1[all_coefs1 != 0]
+#cv.fit$fit$lambda == cv.fit$lambda.min
+write.csv(all_coefs1[all_coefs1 != 0], "lasso.coef.primary.train_2.csv")
+```
+
+
+```{r}
+
+cv.lambda.lasso <- cv.glmnet(x=x_primary, y=y_primary, alpha = 1) 
+plot(cv.lambda.lasso)                        #MSE for several lambdas
+cv.lambda.lasso  
+plot(cv.lambda.lasso$glmnet.fit, "lambda", label=FALSE)
+
+l.lasso.min <- cv.lambda.lasso$lambda.min
+lasso.model <- glmnet(x=x_primary, y=y_primary,alpha  = 1, lambda = l.lasso.min)
+
+## Within cv.fit is the fitted lasso model (fit)
+## Within the fitted model is beta, a matrix of regression coefficients for each lambda
+## We want only the column of beta corresponding to the lambda that minimizes CV RSME
+all_coef <- cv.lambda.lasso$glmnet.fit$beta[,cv.lambda.lasso$glmnet.fit$lambda== cv.lambda.lasso$lambda.min]
+all_coef[all_coef != 0]
+#cv.fit$fit$lambda == cv.fit$lambda.min
+#write.csv(all_coef[all_coef != 0], "lasso.coef.metastasis_2nd_option.csv")
+```
+```{r}
+# Run algorithms using 10-fold cross validation
+FOLFOX_LASSO_53_FOLD01_data <- read.csv(file = 'train_data_53_FOLD01 - lasso - 2.csv', row.names = 1)
+FOLFOX_LASSO_53_FOLD01_data$response <-as.factor(FOLFOX_LASSO_53_FOLD01_data$response)
+test_data_53$response <-as.factor(test_data_53$response)
+
+
+library(randomForest)
+library(randomForest)
+library(prediction)
+library(ROCR)
+library(pROC)
+require(party)
+library(dplyr)
+library(ggplot2)
+library(caret)
+library(varImp)
+#rf-other method
+x.rf.imp.weka <- randomForest(response~ ., data= FOLFOX_LASSO_53_FOLD01_data)
+p1.x.cf1_imp.weka<- predict(x.rf.imp.weka, FOLFOX_LASSO_53_FOLD01_data)
+confusionMatrix(p1.x.cf1_imp.weka, FOLFOX_LASSO_53_FOLD01_data$response)
+pred.x.cf1_imp.weka <- predict(x.rf.imp.weka, test_data_53, type = "response")
+confusionMatrix(pred.x.cf1_imp.weka, test_data_53$response)
+preds.x.cf1_imp.weka <- prediction(as.numeric(pred.x.cf1_imp.weka), na.omit(test_data_53$response))
+perf.x.cf1_imp.weka <- performance(preds.x.cf1_imp.weka,"tpr","fpr")
+performance(preds.x.cf1_imp.weka,"auc")@y.values
+
+pred.x.cf1_imp.weka <- predict(x.rf.imp.weka, test_data_02, type = "response")
+confusionMatrix(pred.x.cf1_imp.weka, test_data_02$response)
+preds.x.cf1_imp.weka <- prediction(as.numeric(pred.x.cf1_imp.weka), na.omit(test_data_02$response))
+perf.x.cf1_imp.weka <- performance(preds.x.cf1_imp.weka,"tpr","fpr")
+performance(preds.x.cf1_imp.weka,"auc")@y.values
+
+#SVM
+library(caret)
+require(e1071)
+x.svm.imp.weka <- svm(response~., data= FOLFOX_LASSO_53_FOLD01_data,type="C-classification",kernel="radial")
+p1.x.svm.cf1_imp.weka <- predict(x.svm.imp.weka, na.omit(FOLFOX_LASSO_53_FOLD01_data), type="prob")
+confusionMatrix(p1.x.svm.cf1_imp.weka, na.omit(FOLFOX_LASSO_53_FOLD01_data$response))
+pred.svm.cf1_imp.weka <- predict(x.svm.imp.weka,  na.omit(test_data_53), type="prob")
+confusionMatrix(pred.svm.cf1_imp.weka, na.omit(test_data_53$response))
+preds.svm.cf1_imp.weka <- prediction(as.numeric(pred.svm.cf1_imp.weka), na.omit(test_data_53$response))
+perf.svm.cf1_imp.weka <- performance(preds.svm.cf1_imp.weka,"tpr","fpr")
+performance(preds.svm.cf1_imp.weka,"auc")@y.values
+
+pred.svm.cf1_imp.weka <- predict(x.svm.imp.weka,  na.omit(FOLFOX_02_data.scaled), type="prob")
+confusionMatrix(pred.svm.cf1_imp.weka, na.omit(FOLFOX_02_data.scaled$response))
+preds.svm.cf1_imp.weka <- prediction(as.numeric(pred.svm.cf1_imp.weka), na.omit(FOLFOX_02_data.scaled$response))
+perf.svm.cf1_imp.weka <- performance(preds.svm.cf1_imp.weka,"tpr","fpr")
+performance(preds.svm.cf1_imp.weka,"auc")@y.values
+
+
+#KNN
+trControl2 <- trainControl(method = "repeatedcv",
+                          number = 10,
+                          repeats = 3)
+x.knn.imp.weka <- train(response~., data=na.omit(FOLFOX_LASSO_53_FOLD01_data), method="knn")
+p1.x.knn.cf1_imp.weka <- predict(x.knn.imp.weka, na.omit(FOLFOX_LASSO_53_FOLD01_data), type="raw")
+confusionMatrix(p1.x.knn.cf1_imp.weka, FOLFOX_LASSO_53_FOLD01_data$response)
+pred.knn.cf1.imp.weka <- predict(x.knn.imp.weka,  na.omit(test_data_53), type="raw")
+confusionMatrix(pred.knn.cf1.imp.weka, na.omit(test_data_53$response))
+preds.knn.cf1_imp.weka <- prediction(as.numeric(pred.knn.cf1.imp.weka), na.omit(test_data_53$response))
+perf.knn.cf1_imp.weka <- performance(preds.knn.cf1_imp.weka,"tpr","fpr")
+performance(preds.knn.cf1_imp.weka,"auc")@y.values
+```
+
+
+
+```{r}
+#TRAIN_ LASSO
+library(pROC)
+#rf_train
+pred_rf_varselrf_lasso <- predict(x.rf.imp.weka, FOLFOX_LASSO_53_FOLD01_data, index=2, type="prob", norm.votes=TRUE, predict.all=FALSE, proximity=FALSE, nodes=FALSE)
+head(pred_rf_varselrf_lasso)
+pred_rf_varselrf_lasso <- data.frame(pred_rf_varselrf_lasso)
+
+rf_train_lasso_varselrf <- roc(FOLFOX_LASSO_53_FOLD01_data$response, pred_rf_varselrf_lasso$responder, percent=F,   boot.n=1000, ci.alpha=0.95, stratified=FALSE, plot=TRUE, grid=TRUE, show.thres=TRUE, legacy.axes = TRUE, reuse.auc = TRUE,print.auc = TRUE, print.thres.col = "blue", ci=TRUE, ci.type="bars", print.thres.cex = 0.3, main = paste("ROC curve of rf using ","(N = ",nrow(FOLFOX_LASSO_53_FOLD01_data),")") )
+rf_train_lasso_varselrf
+
+#svm_train
+
+pred_svm_lasso_varselrf <- predict(x.svm.imp.weka, FOLFOX_LASSO_53_FOLD01_data, index=2, type="prob", norm.votes=TRUE, predict.all=FALSE, proximity=FALSE, nodes=FALSE)
+head(pred_svm_lasso_varselrf)
+pred_svm_lasso_varselrf <- data.frame(pred_svm_lasso_varselrf)
+
+svm_train_varselrf_lasso <- roc(FOLFOX_LASSO_53_FOLD01_data$response, pred_rf_varselrf_lasso$responder, percent=F,   boot.n=1000, ci.alpha=0.95, stratified=FALSE, plot=TRUE, grid=TRUE, show.thres=TRUE, legacy.axes = TRUE, reuse.auc = TRUE,print.auc = TRUE, print.thres.col = "blue", ci=TRUE, ci.type="bars", print.thres.cex = 0.3, main = paste("ROC curve of SVM using","(N = ",nrow(FOLFOX_LASSO_53_FOLD01_data),")") )
+svm_train_varselrf_lasso
+
+#KNN
+
+pred_knn_varselrf <- predict(x.knn.imp.weka, FOLFOX_LASSO_53_FOLD01_data, index=2, type="prob", norm.votes=TRUE, predict.all=FALSE, proximity=FALSE, nodes=FALSE)
+head(pred_knn_varselrf)
+pred_knn_varselrf <- data.frame(pred_knn_varselrf)
+knn_train_varselrf_lasso <- roc(FOLFOX_LASSO_53_FOLD01_data$response, pred_knn_varselrf$responder, percent=F,   boot.n=1000, ci.alpha=0.95, stratified=FALSE, plot=TRUE, grid=TRUE, show.thres=TRUE, legacy.axes = TRUE, reuse.auc = TRUE,print.auc = TRUE, print.thres.col = "blue", ci=TRUE, ci.type="bars", print.thres.cex = 0.3, main = paste("ROC curve of KNN using","(N = ",nrow(FOLFOX_LASSO_53_FOLD01_data),")") )
+knn_train_varselrf_lasso
+
+
+
+#TEST_ LASSO
+library(pROC)
+#rf_train
+pred_rf_lasso_varselrf_test <- predict(x.rf.imp.weka, test_data_53, index=2, type="prob", norm.votes=TRUE, predict.all=FALSE, proximity=FALSE, nodes=FALSE)
+head(pred_rf_lasso_varselrf_test)
+pred_rf_lasso_varselrf_test <- data.frame(pred_rf_lasso_varselrf_test)
+
+rf_test_varselrf_lasso <- roc(test_data_53$response, pred_rf_lasso_varselrf_test$responder, percent=F,   boot.n=1000, ci.alpha=0.95, stratified=FALSE, plot=TRUE, grid=TRUE, show.thres=TRUE, legacy.axes = TRUE, reuse.auc = TRUE,print.auc = TRUE, print.thres.col = "blue", ci=TRUE, ci.type="bars", print.thres.cex = 0.3, main = paste("ROC curve of RF using","(N = ",nrow(test_data_53),")") )
+rf_test_varselrf_lasso
+
+#svm_train
+
+pred_svm_varselrf_lasso_test <- predict(x.svm.imp.weka, test_data_53, index=2, type="class", norm.votes=TRUE, predict.all=FALSE, proximity=FALSE, nodes=FALSE)
+head(pred_svm_varselrf_lasso_test)
+pred_svm_varselrf_lasso_test <- data.frame(pred_svm_varselrf_lasso_test)
+
+svm_test_varselrf_lasso <- roc(test_data_53$response, pred_rf_lasso_varselrf_test$responder, percent=F,   boot.n=1000, ci.alpha=0.95, stratified=FALSE, plot=TRUE, grid=TRUE, show.thres=TRUE, legacy.axes = TRUE, reuse.auc = TRUE,print.auc = TRUE, print.thres.col = "blue", ci=TRUE, ci.type="bars", print.thres.cex = 0.3, main = paste("ROC curve of SVM using","(N = ",nrow(test_data_53),")") )
+svm_test_varselrf_lasso
+
+#KNN
+
+pred_knn_varselrf_lasso_test <- predict(x.knn.imp.weka, test_data_53, index=2, type="prob", norm.votes=TRUE, predict.all=FALSE, proximity=FALSE, nodes=FALSE)
+head(pred_knn_varselrf_lasso_test)
+pred_knn_varselrf_lasso_test <- data.frame(pred_knn_varselrf_lasso_test)
+knn_test_varselrf_lasso <- roc(test_data_53$response, pred_knn_varselrf_test$responder, percent=F,   boot.n=1000, ci.alpha=0.95, stratified=FALSE, plot=TRUE, grid=TRUE, show.thres=TRUE, legacy.axes = TRUE, reuse.auc = TRUE,print.auc = TRUE, print.thres.col = "blue", ci=TRUE, ci.type="bars", print.thres.cex = 0.3, main = paste("ROC curve of KNN using","(N = ",nrow(test_data),")") )
+knn_test_varselrf_lasso
+
+ggroc(list(RF=rf_train_lasso_varselrf, SVM =svm_train_varselrf_lasso, KNN=knn_train_varselrf_lasso), lwd=1.0)+
+geom_abline(intercept = 1, slope = 1, color = "red", linetype = "dashed", lwd=1.2)+
+scale_color_manual(labels = c("RandomForest", "SVM", "KNN"), values= c("#88D04B", "#D65076", "#EFC050"))+
+ggtitle("ROC COMPARISON")+
+labs(x="Specificity", y="Sensitivity")+
+theme(axis.text.y = element_text(size=12))+
+theme(axis.text.x = element_text(size=12))+
+theme(plot.title = element_text(face="bold", size=18))+
+theme(axis.title = element_text(size=14))+
+theme(strip.text = element_text(size = 14))+
+theme(legend.title=element_blank())
+
+
+ggroc(list(RF=rf_test_varselrf_lasso, SVM =svm_test_varselrf_lasso, KNN=knn_test_varselrf_lasso), lwd=1.0)+
+geom_abline(intercept = 1, slope = 1, color = "red", linetype = "dashed", lwd=1.2)+
+scale_color_manual(labels = c("RandomForest", "SVM", "KNN"), values= c("#88D04B", "#D65076", "#EFC050"))+
+ggtitle("ROC COMPARISON")+
+labs(x="Specificity", y="Sensitivity")+
+theme(axis.text.y = element_text(size=12))+
+theme(axis.text.x = element_text(size=12))+
+theme(plot.title = element_text(face="bold", size=18))+
+theme(axis.title = element_text(size=14))+
+theme(strip.text = element_text(size = 14))+
+theme(legend.title=element_blank())
+
+```
+
+```{r}
+#VARSELRF
+
+x_varselrf <- dplyr::select(train_data_53, -response)
+y_varselrf <- train_data_53$response
+
+library(varSelRF)
+rf.vs1<- varSelRF(x_varselrf, y_varselrf,c.sd=1, mtryFactor=1, ntree = 5000, ntreeIterat = 2000,vars.drop.frac = 0.2)
+VARS <-rf.vs1$selected.vars
+write.csv(VARS, "VARS_train_data_53_FOLD02_2.csv")
+```
+
+```{r}
+
+# Run algorithms using 10-fold cross validation
+
+# Run algorithms using 10-fold cross validation
+FOLFOX_verselrf_53_FOLD01_data <- read.csv(file = 'train_data_53_FOLD01 - varselrf - 2.csv', row.names = 1)
+FOLFOX_verselrf_53_FOLD01_data$response <-as.factor(FOLFOX_verselrf_53_FOLD01_data$response)
+test_data_53$response <-as.factor(test_data_53$response)
+
+
+library(randomForest)
+library(randomForest)
+library(prediction)
+library(ROCR)
+library(pROC)
+require(party)
+library(dplyr)
+library(ggplot2)
+library(caret)
+library(varImp)
+#rf-other method
+x.rf.varselrf.weka <- randomForest(response~ ., data=FOLFOX_verselrf_53_FOLD01_data)
+p1.x.cf1_varselrf.weka<- predict(x.rf.varselrf.weka, FOLFOX_verselrf_53_FOLD01_data)
+confusionMatrix(p1.x.cf1_varselrf.weka, FOLFOX_verselrf_53_FOLD01_data$response)
+pred.x.cf1_varselrf.weka <- predict(x.rf.varselrf.weka, test_data_53, type = "response")
+confusionMatrix(pred.x.cf1_varselrf.weka, test_data_53$response)
+preds.x.cf1_varselrf.weka <- prediction(as.numeric(pred.x.cf1_varselrf.weka), na.omit(test_data_53$response))
+perf.x.cf1_varselrf.weka <- performance(preds.x.cf1_varselrf.weka,"tpr","fpr")
+performance(preds.x.cf1_varselrf.weka,"auc")@y.values
+
+pred.x.cf1_varselrf.weka <- predict(x.rf.varselrf.weka, FOLFOX_02_data.scaled, type = "response")
+confusionMatrix(pred.x.cf1_varselrf.weka, FOLFOX_02_data.scaled$response)
+preds.x.cf1_varselrf.weka <- prediction(as.numeric(pred.x.cf1_varselrf.weka), na.omit(FOLFOX_02_data.scaled$response))
+perf.x.cf1_varselrf.weka <- performance(preds.x.cf1_varselrf.weka,"tpr","fpr")
+performance(preds.x.cf1_varselrf.weka,"auc")@y.values
+
+#SVM
+library(caret)
+require(e1071)
+x.svm.varselrf.weka <- svm(response~., data = na.omit(FOLFOX_verselrf_53_FOLD01_data),type="C-classification",kernel="radial")
+p1.x.svm.cf1_varselrf.weka <- predict(x.svm.varselrf.weka, na.omit(FOLFOX_verselrf_53_FOLD01_data), type="prob")
+confusionMatrix(p1.x.svm.cf1_varselrf.weka, na.omit(FOLFOX_verselrf_53_FOLD01_data$response))
+pred.svm.cf1_varselrf.weka <- predict(x.svm.varselrf.weka,  na.omit(test_data_53), type="prob")
+confusionMatrix(pred.svm.cf1_varselrf.weka, na.omit(test_data_53$response))
+preds.svm.cf1_varselrf.weka <- prediction(as.numeric(pred.svm.cf1_varselrf.weka), na.omit(test_data_53$response))
+perf.svm.cf1_varselrf.weka <- performance(preds.svm.cf1_varselrf.weka,"tpr","fpr")
+performance(preds.svm.cf1_varselrf.weka,"auc")@y.values
+
+pred.svm.cf1_varselrf.weka <- predict(x.svm.varselrf.weka,  na.omit(FOLFOX_02_data.scaled), type="prob")
+confusionMatrix(pred.svm.cf1_varselrf.weka, na.omit(FOLFOX_02_data.scaled$response))
+preds.svm.cf1_varselrf.weka <- prediction(as.numeric(pred.svm.cf1_varselrf.weka), na.omit(FOLFOX_02_data.scaled$response))
+perf.svm.cf1_varselrf.weka <- performance(preds.svm.cf1_varselrf.weka,"tpr","fpr")
+performance(preds.svm.cf1_varselrf.weka,"auc")@y.values
+
+
+#KNN
+trControl2 <- trainControl(method = "repeatedcv",
+                          number = 10,
+                          repeats = 3)
+x.knn.varselrf.weka <- train(response~., data=na.omit(FOLFOX_verselrf_53_FOLD01_data), method="knn")
+p1.x.knn.cf1_varselrf.weka <- predict(x.knn.varselrf.weka, na.omit(FOLFOX_verselrf_53_FOLD01_data), type="raw")
+confusionMatrix(p1.x.knn.cf1_varselrf.weka, FOLFOX_verselrf_53_FOLD01_data$response)
+pred.knn.cf1_varselrf.weka <- predict(x.knn.varselrf.weka,  na.omit(test_data_53), type="raw")
+confusionMatrix(pred.knn.cf1_varselrf.weka, na.omit(test_data_53$response))
+preds.knn.cf1_varselrf.weka <- prediction(as.numeric(pred.knn.cf1_varselrf.weka), na.omit(test_data_53$response))
+perf.knn.cf1_varselrf.weka <- performance(preds.knn.cf1_varselrf.weka,"tpr","fpr")
+performance(preds.knn.cf1_varselrf.weka,"auc")@y.values
+
+pred.knn.cf1_varselrf.weka <- predict(x.knn.varselrf.weka,  na.omit(FOLFOX_02_data.scaled), type="raw")
+confusionMatrix(pred.knn.cf1_varselrf.weka, na.omit(FOLFOX_02_data.scaled$response))
+preds.knn.cf1_varselrf.weka <- prediction(as.numeric(pred.knn.cf1_varselrf.weka), na.omit(FOLFOX_02_data.scaled$response))
+perf.knn.cf1_varselrf.weka <- performance(preds.knn.cf1_varselrf.weka,"tpr","fpr")
+performance(preds.knn.cf1_varselrf.weka,"auc")@y.values
+```
+
+```{r}
+# Run algorithms using 10-fold cross validation
+varselrf_53_train.weka <- read.csv(file = 'train_data_53_FOLD01 - varselrf - lasso - 2.csv', row.names = 1)
+FOLFOX_02_data.scaled$response <-as.factor(FOLFOX_02_data.scaled$response)
+varselrf_53_train.weka$response <-as.factor(varselrf_53_train.weka$response)
+
+
+# Run algorithms using 10-fold cross validation
+
+library(randomForest)
+library(randomForest)
+library(prediction)
+library(ROCR)
+library(pROC)
+require(party)
+library(dplyr)
+library(ggplot2)
+library(caret)
+library(varImp)
+#rf-other method
+
+x.rf.varselrf.weka <- randomForest(response~ ., data=varselrf_53_train.weka)
+p1.x.cf1_varselrf.weka<- predict(x.rf.varselrf.weka, varselrf_53_train.weka)
+confusionMatrix(p1.x.cf1_varselrf.weka, varselrf_53_train.weka$response)
+pred.x.cf1_varselrf.weka <- predict(x.rf.varselrf.weka, test_data_53, type = "response")
+confusionMatrix(pred.x.cf1_varselrf.weka, test_data_53$response)
+preds.x.cf1_varselrf.weka <- prediction(as.numeric(pred.x.cf1_varselrf.weka), na.omit(test_data_53$response))
+perf.x.cf1_varselrf.weka <- performance(preds.x.cf1_varselrf.weka,"tpr","fpr")
+performance(preds.x.cf1_varselrf.weka,"auc")@y.values
+
+
+pred.x.cf1_varselrf.weka <- predict(x.rf.varselrf.weka, test_data_02, type = "response")
+confusionMatrix(pred.x.cf1_varselrf.weka, test_data_02$response)
+preds.x.cf1_varselrf.weka <- prediction(as.numeric(pred.x.cf1_varselrf.weka), na.omit(test_data_02$response))
+perf.x.cf1_varselrf.weka <- performance(preds.x.cf1_varselrf.weka,"tpr","fpr")
+performance(preds.x.cf1_varselrf.weka,"auc")@y.values
+
+#SVM
+library(caret)
+require(e1071)
+x.svm.varselrf.weka <- svm(response~., data = na.omit(varselrf_53_train.weka),type="C-classification",kernel="radial")
+p1.x.svm.cf1_varselrf.weka <- predict(x.svm.varselrf.weka, na.omit(varselrf_53_train.weka), type="prob")
+confusionMatrix(p1.x.svm.cf1_varselrf.weka, na.omit(varselrf_53_train.weka$response))
+pred.svm.cf1_varselrf.weka <- predict(x.svm.varselrf.weka,  na.omit(test_data_53), type="prob")
+confusionMatrix(pred.svm.cf1_varselrf.weka, na.omit(test_data_53$response))
+preds.svm.cf1_varselrf.weka <- prediction(as.numeric(pred.svm.cf1_varselrf.weka), na.omit(test_data_53$response))
+perf.svm.cf1_varselrf.weka <- performance(preds.svm.cf1_varselrf.weka,"tpr","fpr")
+performance(preds.svm.cf1_varselrf.weka,"auc")@y.values
+
+pred.svm.cf1_varselrf.weka <- predict(x.svm.varselrf.weka,  na.omit(test_data_02), type="prob")
+confusionMatrix(pred.svm.cf1_varselrf.weka, na.omit(test_data_02$response))
+preds.svm.cf1_varselrf.weka <- prediction(as.numeric(pred.svm.cf1_varselrf.weka), na.omit(test_data_02$response))
+perf.svm.cf1_varselrf.weka <- performance(preds.svm.cf1_varselrf.weka,"tpr","fpr")
+performance(preds.svm.cf1_varselrf.weka,"auc")@y.values
+
+
+
+#KNN
+
+x.knn.varselrf.weka <- train(response~., data=na.omit(varselrf_53_train.weka), method="knn")
+p1.x.knn.cf1_varselrf.weka <- predict(x.knn.varselrf.weka, na.omit(varselrf_53_train.weka), type="raw")
+confusionMatrix(p1.x.knn.cf1_varselrf.weka, varselrf_53_train.weka$response)
+pred.knn.cf1_varselrf.weka <- predict(x.knn.varselrf.weka,  na.omit(test_data_53), type="raw")
+confusionMatrix(pred.knn.cf1_varselrf.weka, na.omit(test_data_53$response))
+preds.knn.cf1_varselrf.weka <- prediction(as.numeric(pred.knn.cf1_varselrf.weka), na.omit(test_data_53$response))
+perf.knn.cf1_varselrf.weka <- performance(preds.knn.cf1_varselrf.weka,"tpr","fpr")
+performance(preds.knn.cf1_varselrf.weka,"auc")@y.values
+
+
+pred.knn.cf1_varselrf.weka <- predict(x.knn.varselrf.weka,  na.omit(test_data_02), type="raw")
+confusionMatrix(pred.knn.cf1_varselrf.weka, na.omit(test_data_02$response))
+preds.knn.cf1_varselrf.weka <- prediction(as.numeric(pred.knn.cf1_varselrf.weka), na.omit(test_data_02$response))
+perf.knn.cf1_varselrf.weka <- performance(preds.knn.cf1_varselrf.weka,"tpr","fpr")
+performance(preds.knn.cf1_varselrf.weka,"auc")@y.values
+```
+
+```{r}
+#TRAIN_ LASSO
+library(pROC)
+#rf_train
+pred_rf_varselrf_lasso <- predict(x.rf.varselrf.weka, varselrf_53_train.weka, index=2, type="prob", norm.votes=TRUE, predict.all=FALSE, proximity=FALSE, nodes=FALSE)
+head(pred_rf_varselrf_lasso)
+pred_rf_varselrf_lasso <- data.frame(pred_rf_varselrf_lasso)
+
+rf_train_lasso_varselrf <- roc(varselrf_53_train.weka$response, pred_rf_varselrf_lasso$responder, percent=F,   boot.n=1000, ci.alpha=0.95, stratified=FALSE, plot=TRUE, grid=TRUE, show.thres=TRUE, legacy.axes = TRUE, reuse.auc = TRUE,print.auc = TRUE, print.thres.col = "blue", ci=TRUE, ci.type="bars", print.thres.cex = 0.3, main = paste("ROC curve of rf using ","(N = ",nrow(varselrf_53_train.weka),")") )
+rf_train_lasso_varselrf
+
+#svm_train
+
+pred_svm_lasso_varselrf <- predict(x.svm.varselrf.weka, varselrf_53_train.weka, index=2, type="prob", norm.votes=TRUE, predict.all=FALSE, proximity=FALSE, nodes=FALSE)
+head(pred_svm_lasso_varselrf)
+pred_svm_lasso_varselrf <- data.frame(pred_svm_lasso_varselrf)
+
+svm_train_varselrf_lasso <- roc(varselrf_53_train.weka$response, pred_rf_varselrf_lasso$responder, percent=F,   boot.n=1000, ci.alpha=0.95, stratified=FALSE, plot=TRUE, grid=TRUE, show.thres=TRUE, legacy.axes = TRUE, reuse.auc = TRUE,print.auc = TRUE, print.thres.col = "blue", ci=TRUE, ci.type="bars", print.thres.cex = 0.3, main = paste("ROC curve of SVM using (N = 32))") )
+svm_train_varselrf_lasso
+
+#KNN
+
+pred_knn_varselrf <- predict(x.knn.varselrf.weka, varselrf_53_train.weka, index=2, type="prob", norm.votes=TRUE, predict.all=FALSE, proximity=FALSE, nodes=FALSE)
+head(pred_knn_varselrf)
+pred_knn_varselrf <- data.frame(pred_knn_varselrf)
+knn_train_varselrf_lasso <- roc(varselrf_53_train.weka$response, pred_knn_varselrf$responder, percent=F,   boot.n=1000, ci.alpha=0.95, stratified=FALSE, plot=TRUE, grid=TRUE, show.thres=TRUE, legacy.axes = TRUE, reuse.auc = TRUE,print.auc = TRUE, print.thres.col = "blue", ci=TRUE, ci.type="bars", print.thres.cex = 0.3, main = paste("ROC curve of SVM using (N = 32))") )
+knn_train_varselrf_lasso
+
+
+
+#TEST_ LASSO
+library(pROC)
+#rf_train
+pred_rf_lasso_varselrf_test <- predict(x.rf.varselrf.weka, test_data_53, index=2, type="prob", norm.votes=TRUE, predict.all=FALSE, proximity=FALSE, nodes=FALSE)
+head(pred_rf_lasso_varselrf_test)
+pred_rf_lasso_varselrf_test <- data.frame(pred_rf_lasso_varselrf_test)
+
+rf_test_varselrf_lasso <- roc(test_data_53$response, pred_rf_lasso_varselrf_test$responder, percent=F,   boot.n=1000, ci.alpha=0.95, stratified=FALSE, plot=TRUE, grid=TRUE, show.thres=TRUE, legacy.axes = TRUE, reuse.auc = TRUE,print.auc = TRUE, print.thres.col = "blue", ci=TRUE, ci.type="bars", print.thres.cex = 0.3, main = paste("ROC curve of RF using (N = 32)") )
+rf_test_varselrf_lasso
+
+#svm_train
+
+pred_svm_varselrf_lasso_test <- predict(x.svm.imp.weka, test_data_53, index=2, type="class", norm.votes=TRUE, predict.all=FALSE, proximity=FALSE, nodes=FALSE)
+head(pred_svm_varselrf_lasso_test)
+pred_svm_varselrf_lasso_test <- data.frame(pred_svm_varselrf_lasso_test)
+
+svm_test_varselrf_lasso <- roc(test_data_53$response, pred_rf_lasso_varselrf_test$responder, percent=F,   boot.n=1000, ci.alpha=0.95, stratified=FALSE, plot=TRUE, grid=TRUE, show.thres=TRUE, legacy.axes = TRUE, reuse.auc = TRUE,print.auc = TRUE, print.thres.col = "blue", ci=TRUE, ci.type="bars", print.thres.cex = 0.3, main = paste("ROC curve of SVM using","(N = ",nrow(test_data_53),")") )
+svm_test_varselrf_lasso
+
+#KNN
+
+pred_knn_varselrf_lasso_test <- predict(x.knn.varselrf.weka, test_data_53, index=2, type="prob", norm.votes=TRUE, predict.all=FALSE, proximity=FALSE, nodes=FALSE)
+head(pred_knn_varselrf_lasso_test)
+pred_knn_varselrf_lasso_test <- data.frame(pred_knn_varselrf_lasso_test)
+knn_test_varselrf_lasso <- roc(test_data_53$response, pred_knn_varselrf_test$responder, percent=F,   boot.n=1000, ci.alpha=0.95, stratified=FALSE, plot=TRUE, grid=TRUE, show.thres=TRUE, legacy.axes = TRUE, reuse.auc = TRUE,print.auc = TRUE, print.thres.col = "blue", ci=TRUE, ci.type="bars", print.thres.cex = 0.3, main = paste("ROC curve of KNN using","(N = ",nrow(test_data),")") )
+knn_test_varselrf_lasso
+
+```
+
