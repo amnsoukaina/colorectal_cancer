@@ -1,0 +1,123 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+FOLFOX_TOTAL_data <- read.csv(file = 'data_exp_total.csv', row.names = 1)
+FOLFOX_TOTAL_CLINICAL <- read.csv(file = 'CLINICAL_FOLFOX_TOTAL.csv')
+
+exprs_matrix.norm.FOLFOX <- normalizeBetweenArrays(FOLFOX_TOTAL_data)
+
+par(mar=c(7,5,1,1))
+boxplot(exprs_matrix.norm.FOLFOX,las =2, outline=FALSE,col = "bisque")
+
+write.csv(exprs_matrix.norm.FOLFOX, "exprs_matrix.norm.FOLFOX_2_version.csv")
+
+norm.quantiles.ex <- normalizeQuantiles(exprs_matrix.norm.FOLFOX, ties=TRUE)
+write.csv(norm.quantiles.ex, "exprs_matrix.norm.ex.FOLFOX_2_version.csv")
+
+par(mar=c(7,5,1,1))
+boxplot(norm.quantiles.ex,las =2, outline=FALSE,col = "bisque")
+
+
+```
+
+
+```{r}
+#2nd step of data curation
+
+#data - continuous
+Sys.setenv("VROOM_CONNECTION_SIZE" ="5000000")
+GSE19860_data<- getGEO("GSE19860", GSEMatrix =TRUE, AnnotGPL=TRUE)
+if (length(GSE19860_data) > 1) idx <- grep("GPL570", attr(GSE19860_data, "names")) else idx <- 1
+GSE19860_data <- GSE19860_data[[idx]]
+
+#2
+GSE28702_data<- getGEO("GSE28702", GSEMatrix =TRUE, AnnotGPL=TRUE)
+if (length(GSE28702_data) > 1) idx <- grep("GPL570", attr(GSE28702_data, "names")) else idx <- 1
+GSE28702_data <- GSE28702_data[[idx]]
+
+#3
+GSE72970_data<- getGEO("GSE72970", GSEMatrix =TRUE, AnnotGPL=TRUE)
+if (length(GSE72970_data) > 1) idx <- grep("GPL570", attr(GSE72970_data, "names")) else idx <- 1
+GSE72970_data <- GSE72970_data[[idx]]
+
+```
+
+
+
+
+```{r}
+library(ggrepel)
+library(dplyr)
+library(stats)
+
+#Differential Expression
+
+library(limma)
+design_FOLFOX <- model.matrix(~0+FOLFOX_TOTAL_CLINICAL$CLASS)
+design_FOLFOX
+
+## the column names are a bit ugly, so we will rename
+colnames(design_FOLFOX) <- c("responder","nonresponder")
+fit_FOLFOX <- lmFit(norm.quantiles.ex, design_FOLFOX)
+head(fit_FOLFOX$coefficients)
+
+contrasts <- makeContrasts(responder - nonresponder, levels=design_FOLFOX)
+fit2_FOLFOX<- contrasts.fit(fit_FOLFOX, contrasts)
+fit2_FOLFOX <- eBayes(fit2_FOLFOX)
+Toptable <- topTable(fit2_FOLFOX, coef=1, adjust.method = "fdr")
+
+```
+
+
+```{r}
+GSE19860_data_fdata <- fData(GSE19860_data)
+GSE28702_data_fdata <- fData(GSE28702_data)
+GSE72970_data_fdata <- fData(GSE72970_data)
+anno_FOLFOX <- cbind(GSE19860_data_fdata,GSE28702_data_fdata,GSE72970_data_fdata)
+library(stringr)
+library(dplyr)
+
+anno_FOLFOX <- select(anno_FOLFOX, "Gene symbol","Gene ID", "GO:Function", "GO:Process", "GO:Component")
+fit2_FOLFOX$genes <- anno_FOLFOX
+topTable(fit2_FOLFOX,coef=1, adjust.method = "fdr")
+
+full_results_FOLFOX <- topTable(fit2_FOLFOX, number=Inf,adjust.method = "fdr")
+full_results_FOLFOX<- tibble::rownames_to_column(full_results_FOLFOX,"ID")
+
+write.csv(full_results_FOLFOX, "Toptable_quantile_2nd_version.csv")
+
+```
+```{r}
+#volcano plot for FOLFOX
+library(ggrepel)
+p_cutoff <- 0.05
+fc_cutoff <- 1
+topN <- 25
+full_results_FOLFOX %>% 
+  mutate(Significant = P.Value < p_cutoff, abs(logFC)>fc_cutoff) %>% 
+  mutate(Rank = 1:n(), Label = ifelse(Rank < topN, Gene.symbol,"")) %>% 
+  ggplot(aes(x = logFC, y = B, col=Significant,label=Label)) + geom_point() + geom_text_repel(col="black")
+```
+
+```{r}
+#Filtering data
+p_cutoff <- 0.05
+fc_cutoff <- 1.0
+
+filter(full_results_FOLFOX, P.Value < 0.05, abs(logFC) > 0.6)
+
+#combine genes with expression data then save the data
+library(readr)
+full_output_FOLFOX <- cbind(full_results_FOLFOX,norm.quantiles.ex)
+write_csv(full_output_FOLFOX, path="full_output_FOLFOX_quantile_2nd_version.csv")
+```
+
+
+```{r}
+
+```
+
+
